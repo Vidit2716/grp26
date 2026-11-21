@@ -13,8 +13,11 @@ source=review or invoices
 if not source:
     st.success("No invoices require human review.")
     st.stop()
-choice=st.selectbox("Invoice requiring attention", range(len(source)), format_func=lambda i:f"{source[i].get('invoice_number') or source[i].get('file_name')} · {source[i].get('vendor_name') or 'Unknown'} · {status(source[i].get('validation_status'))}")
-invoice_id=str(source[choice]["invoice_id"])
+source_ids=[str(x.get("invoice_id") or i) for i,x in enumerate(source)]
+source_labels={source_ids[i]:f"{x.get('invoice_number') or x.get('file_name')} · {x.get('vendor_name') or 'Unknown'} · {status(x.get('validation_status'))}" for i,x in enumerate(source)}
+if st.session_state.get("review_invoice_choice") not in source_ids:
+    st.session_state["review_invoice_choice"]=source_ids[0]
+invoice_id=st.selectbox("Invoice requiring attention", source_ids, format_func=lambda value:source_labels[value], key="review_invoice_choice")
 try: comparison=get_comparison(invoice_id); detail=comparison["invoice"]
 except AgentAPIError as exc: st.error(str(exc)); st.stop()
 
@@ -44,7 +47,7 @@ for i in range(maxn):
     cur=current_lines[i] if i<len(current_lines) else {}
     er=erp_lines[i] if i<len(erp_lines) else {}
     pdf=pdf_lines[i] if i<len(pdf_lines) else {}
-line_rows.append({"Line":i+1,"SKU (PDF)":pdf.get("sku"),"SKU (current)":cur.get("sku"),"SKU (ERP)":er.get("sku") or er.get("sku_code"),"Qty (PDF)":pdf.get("quantity"),"Qty (current)":cur.get("quantity"),"Qty (ERP)":er.get("quantity"),"Price (PDF)":pdf.get("unit_price"),"Price (current)":cur.get("unit_price"),"Price (ERP)":er.get("unit_price") or er.get("price"),"Diff PDF→ERP": any(str(pdf.get(k))!=str(er.get(k2)) for k,k2 in [("sku","sku"),("quantity","quantity"),("unit_price","unit_price")]),"Diff current→ERP": any(str(cur.get(k))!=str(er.get(k2)) for k,k2 in [("sku","sku"),("quantity","quantity"),("unit_price","unit_price")])})
+    line_rows.append({"Line":i+1,"SKU (PDF)":pdf.get("sku"),"SKU (current)":cur.get("sku"),"SKU (ERP)":er.get("sku") or er.get("sku_code"),"Qty (PDF)":pdf.get("quantity"),"Qty (current)":cur.get("quantity"),"Qty (ERP)":er.get("quantity"),"Price (PDF)":pdf.get("unit_price"),"Price (current)":cur.get("unit_price"),"Price (ERP)":er.get("unit_price") or er.get("price"),"Diff PDF→ERP": any(str(pdf.get(k))!=str(er.get(k2)) for k,k2 in [("sku","sku"),("quantity","quantity"),("unit_price","unit_price")]),"Diff current→ERP": any(str(cur.get(k))!=str(er.get(k2)) for k,k2 in [("sku","sku"),("quantity","quantity"),("unit_price","unit_price")])})
 st.dataframe(pd.DataFrame(line_rows),use_container_width=True,hide_index=True)
 
 st.divider()
@@ -53,21 +56,21 @@ st.caption("Corrections are appended to human feedback and revalidated. The orig
 with st.form("review_form"):
     scalar={}
     c1,c2,c3=st.columns(3)
-    scalar["invoice_number"]=c1.text_input("Invoice number",value=str(detail.get("invoice_number") or ""))
-    scalar["vendor_name"]=c2.text_input("Vendor",value=str(detail.get("vendor_name") or ""))
-    scalar["po_number"]=c3.text_input("PO number",value=str(detail.get("po_number") or ""))
+    scalar["invoice_number"]=c1.text_input("Invoice number",value=str(detail.get("invoice_number") or ""),key=f"review_invoice_{invoice_id}")
+    scalar["vendor_name"]=c2.text_input("Vendor",value=str(detail.get("vendor_name") or ""),key=f"review_vendor_{invoice_id}")
+    scalar["po_number"]=c3.text_input("PO number",value=str(detail.get("po_number") or ""),key=f"review_po_{invoice_id}")
     c4,c5,c6=st.columns(3)
-    scalar["invoice_date"]=c4.text_input("Invoice date",value=str(detail.get("invoice_date") or ""))
-    scalar["currency"]=c5.text_input("Currency",value=str(detail.get("currency") or ""))
-    scalar["total_amount"]=c6.number_input("Total",value=float(detail.get("total_amount") or 0),format="%.2f")
+    scalar["invoice_date"]=c4.text_input("Invoice date",value=str(detail.get("invoice_date") or ""),key=f"review_date_{invoice_id}")
+    scalar["currency"]=c5.text_input("Currency",value=str(detail.get("currency") or ""),key=f"review_currency_{invoice_id}")
+    scalar["total_amount"]=c6.number_input("Total",value=float(detail.get("total_amount") or 0),format="%.2f",key=f"review_total_{invoice_id}")
     st.markdown("**Line items**")
     corrected=[]
     for i,item in enumerate(current_lines):
         c=st.columns(5)
-        corrected.append({"line_number":i+1,"sku":c[0].text_input(f"SKU {i+1}",value=str(item.get("sku") or ""),key=f"sku_{i}"),"description":c[1].text_input(f"Description {i+1}",value=str(item.get("description") or ""),key=f"desc_{i}"),"quantity":c[2].number_input(f"Qty {i+1}",value=float(item.get("quantity") or 0),key=f"qty_{i}"),"unit_price":c[3].number_input(f"Unit price {i+1}",value=float(item.get("unit_price") or 0),key=f"price_{i}"),"line_total":c[4].number_input(f"Line total {i+1}",value=float(item.get("line_total") or 0),key=f"line_{i}")})
-    feedback=st.text_area("Auditor note",placeholder="Explain why the correction was made…")
-    decision=st.selectbox("Decision",["revalidate","approve","reject"])
-    submit=st.form_submit_button("Apply correction & revalidate",type="primary",use_container_width=True)
+        corrected.append({"line_number":i+1,"sku":c[0].text_input(f"SKU {i+1}",value=str(item.get("sku") or ""),key=f"sku_{invoice_id}_{i}"),"description":c[1].text_input(f"Description {i+1}",value=str(item.get("description") or ""),key=f"desc_{invoice_id}_{i}"),"quantity":c[2].number_input(f"Qty {i+1}",value=float(item.get("quantity") or 0),key=f"qty_{invoice_id}_{i}"),"unit_price":c[3].number_input(f"Unit price {i+1}",value=float(item.get("unit_price") or 0),key=f"price_{invoice_id}_{i}"),"line_total":c[4].number_input(f"Line total {i+1}",value=float(item.get("line_total") or 0),key=f"line_{invoice_id}_{i}")})
+    feedback=st.text_area("Auditor note",placeholder="Explain why the correction was made…",key=f"review_note_{invoice_id}")
+    decision=st.selectbox("Decision",["revalidate","approve","reject"],format_func=lambda value: {"revalidate":"Revalidate","approve":"Approve","reject":"Reject"}[value],key=f"review_decision_{invoice_id}")
+    submit=st.form_submit_button("Apply corrections & revalidate",type="primary",use_container_width=True)
 if submit:
     corrections={k:v for k,v in scalar.items() if v not in {"",None}}
     corrections["line_items"]=corrected

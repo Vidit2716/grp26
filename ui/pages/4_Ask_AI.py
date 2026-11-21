@@ -12,20 +12,26 @@ opts=[("All invoices",None)]+[(f"{x.get('invoice_number') or x.get('file_name')}
 selected=st.selectbox("Evidence scope",range(len(opts)),format_func=lambda i:opts[i][0])
 invoice_id=opts[selected][1]
 with st.container(border=True):
-    for q in ["What is the total amount?","What discrepancies are open?","Explain why this invoice needs human review.","Summarize the invoice and its audit history."]:
-        if st.button(q,key=f"q_{q}"): st.session_state["question"]=q
-    question=st.text_area("Question",value=st.session_state.get("question",""),height=110)
-    go=st.button("Generate answer",type="primary",use_container_width=True)
+    st.caption("Try a question")
+    prompts = ["What is the total amount?", "What discrepancies are open?", "Why does this invoice need human review?", "Summarize its audit history."]
+    prompt_cols = st.columns(2)
+    for i, q in enumerate(prompts):
+        if prompt_cols[i % 2].button(q, key=f"q_{i}", use_container_width=True):
+            st.session_state["question"] = q
+    question=st.text_area("Ask about the selected evidence",key="question",height=105,placeholder="Ask a specific question about invoices or audit decisions…")
+    go=st.button("Run audit query",type="primary",use_container_width=True)
 if go and question.strip():
     try:
         with st.spinner("Routing, retrieving current evidence and evaluating the answer…"):
             st.session_state["ask_result"]=ask_ai(question.strip(),invoice_id=invoice_id)
             st.session_state["ask_question"]=question.strip()
+            st.session_state["ask_invoice_id"]=invoice_id
     except AgentAPIError as exc: st.error(str(exc))
 
-result=st.session_state.get("ask_result")
+result=st.session_state.get("ask_result") if st.session_state.get("ask_invoice_id")==invoice_id else None
 if result:
     st.subheader("Answer")
+    st.caption(f"Question · {st.session_state.get('ask_question') or ''}")
     st.markdown(f'<div class="answer">{result.get("answer") or "No answer generated."}</div>',unsafe_allow_html=True)
     st.caption(f"Route: {str(result.get('route') or result.get('answer_source') or 'rag').upper()} · accepted: {result.get('accepted')} · retries: {result.get('retry_count',0)}")
     if result.get("route")=="sql":

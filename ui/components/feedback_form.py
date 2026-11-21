@@ -1,163 +1,27 @@
 from __future__ import annotations
-
 from typing import Any
-
 import streamlit as st
 
 
-def render_feedback_form(
-    invoice: dict[str, Any],
-) -> dict[str, Any] | None:
-
-    invoice_id = invoice.get(
-        "invoice_id"
-    )
-
-    status = invoice.get(
-        "validation_status"
-    )
-
-    human_review = invoice.get(
-        "human_review_required"
-    )
-
-    if not human_review and status != "manual_review":
+def render_feedback_form(invoice: dict[str, Any]) -> dict[str, Any] | None:
+    invoice_id = str(invoice.get("invoice_id") or "unknown")
+    if not invoice.get("human_review_required") and str(invoice.get("validation_status") or "").lower() not in {"manual_review", "failed", "invalid_erp"}:
         return None
-
-    st.divider()
-
-    st.subheader("Human Review")
-
-    st.warning(
-        "This invoice requires manual review. "
-        "Corrections are stored as human feedback "
-        "and the original extraction is preserved."
-    )
-
-    line_items = invoice.get(
-        "line_items",
-        [],
-    )
-
+    st.subheader("Review decision")
+    st.caption("Corrections are recorded as human feedback; the original extraction remains available for comparison.")
     corrections: dict[str, Any] = {}
-
-    if line_items:
-
-        st.markdown(
-            "### Correct extracted values"
-        )
-
-        for index, line in enumerate(
-            line_items
-        ):
-
-            line_number = line.get(
-                "line_number",
-                index + 1,
-            )
-
-            sku = line.get(
-                "sku",
-                "",
-            )
-
-            st.markdown(
-                f"**Line {line_number} — "
-                f"{sku or 'Unknown SKU'}**"
-            )
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                quantity = st.number_input(
-                    "Quantity",
-                    value=float(
-                        line.get(
-                            "quantity"
-                        ) or 0
-                    ),
-                    min_value=0.0,
-                    key=(
-                        f"qty_"
-                        f"{invoice_id}_"
-                        f"{line_number}"
-                    ),
-                )
-
-            with col2:
-                unit_price = st.number_input(
-                    "Unit Price",
-                    value=float(
-                        line.get(
-                            "unit_price"
-                        ) or 0
-                    ),
-                    min_value=0.0,
-                    key=(
-                        f"price_"
-                        f"{invoice_id}_"
-                        f"{line_number}"
-                    ),
-                )
-
-            with col3:
-                line_total = st.number_input(
-                    "Line Total",
-                    value=float(
-                        line.get(
-                            "line_total"
-                        ) or 0
-                    ),
-                    min_value=0.0,
-                    key=(
-                        f"total_"
-                        f"{invoice_id}_"
-                        f"{line_number}"
-                    ),
-                )
-
-            corrections[
-                f"line_{line_number}"
-            ] = {
-                "sku": sku,
-                "quantity": quantity,
-                "unit_price": unit_price,
-                "line_total": line_total,
-            }
-
-    st.markdown(
-        "### Review decision"
-    )
-
-    decision = st.radio(
-        "Decision",
-        [
-            "manual_review",
-            "approve",
-            "reject",
-        ],
-        horizontal=True,
-        key=f"decision_{invoice_id}",
-    )
-
-    feedback = st.text_area(
-        "Reviewer comments",
-        placeholder=(
-            "Explain the correction or "
-            "review decision..."
-        ),
-        key=f"feedback_{invoice_id}",
-    )
-
-    if st.button(
-        "Submit Human Review",
-        type="primary",
-        key=f"submit_hitl_{invoice_id}",
-    ):
-        return {
-            "corrections": corrections,
-            "decision": decision,
-            "feedback": feedback.strip(),
-        }
-
+    lines = invoice.get("line_items") or []
+    if lines:
+        for index, line in enumerate(lines):
+            number = line.get("line_number", index + 1)
+            with st.expander(f"Line {number} · {line.get('sku') or 'Unknown SKU'}", expanded=False):
+                cols = st.columns(3)
+                sku = cols[0].text_input("SKU", value=str(line.get("sku") or ""), key=f"feedback_sku_{invoice_id}_{number}")
+                quantity = cols[1].number_input("Quantity", value=float(line.get("quantity") or 0), min_value=0.0, key=f"feedback_qty_{invoice_id}_{number}")
+                price = cols[2].number_input("Unit price", value=float(line.get("unit_price") or 0), min_value=0.0, key=f"feedback_price_{invoice_id}_{number}")
+                corrections[f"line_{number}"] = {"sku": sku, "quantity": quantity, "unit_price": price, "line_total": quantity * price}
+    decision = st.radio("Decision", ["manual_review", "approve", "reject"], format_func=lambda x: {"manual_review": "Keep in review", "approve": "Approve", "reject": "Reject"}[x], horizontal=True, key=f"decision_{invoice_id}")
+    feedback = st.text_area("Reviewer note", placeholder="Explain the correction or decision…", key=f"feedback_{invoice_id}")
+    if st.button("Submit review", type="primary", key=f"submit_hitl_{invoice_id}"):
+        return {"corrections": corrections, "decision": decision, "feedback": feedback.strip()}
     return None

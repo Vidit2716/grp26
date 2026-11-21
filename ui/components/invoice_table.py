@@ -1,109 +1,30 @@
 from __future__ import annotations
-
 from typing import Any
-
 import pandas as pd
 import streamlit as st
+from shared import fmt_money, status
 
 
-def render_invoice_table(
-    invoices: list[dict[str, Any]],
-) -> str | None:
-
+def render_invoice_table(invoices: list[dict[str, Any]]) -> str | None:
     if not invoices:
-        st.info(
-            "No invoices available."
-        )
+        st.info("No invoices available.")
         return None
-
-    display_rows = []
-
-    for invoice in invoices:
-
-        display_rows.append(
-            {
-                "Invoice Number": (
-                    invoice.get(
-                        "invoice_number"
-                    )
-                    or "Unknown"
-                ),
-                "Vendor": (
-                    invoice.get(
-                        "vendor_name"
-                    )
-                    or "Unknown"
-                ),
-                "PO": (
-                    invoice.get(
-                        "po_number"
-                    )
-                    or "—"
-                ),
-                "Date": (
-                    invoice.get(
-                        "invoice_date"
-                    )
-                    or "—"
-                ),
-                "Total": (
-                    f"{invoice.get('currency') or ''} "
-                    f"{invoice.get('total_amount') or 0}"
-                ),
-                "Status": (
-                    invoice.get(
-                        "validation_status"
-                    )
-                    or "unknown"
-                ),
-                "Recommendation": (
-                    invoice.get(
-                        "recommendation"
-                    )
-                    or "—"
-                ),
-            }
-        )
-
-    dataframe = pd.DataFrame(
-        display_rows
-    )
-
-    st.dataframe(
-        dataframe,
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    # ------------------------------------------------------------
-    # Selection
-    # ------------------------------------------------------------
-
-    options = {}
-
-    for invoice in invoices:
-
-        invoice_id = invoice.get(
-            "invoice_id"
-        )
-
-        invoice_number = invoice.get("invoice_number") or "Invoice number pending"
-        file_name = invoice.get("file_name") or "Unnamed file"
-        vendor = invoice.get("vendor_name") or "Vendor unknown"
-
-        if invoice_id:
-            label = f"{file_name} | {invoice_number} | {vendor} | {invoice_id[:8]}"
-            options[label] = invoice_id
-
-    if not options:
+    rows = [{
+        "Invoice": x.get("invoice_number") or "Pending",
+        "Vendor": x.get("vendor_name") or "Unknown",
+        "PO": x.get("po_number") or "—",
+        "Date": x.get("invoice_date") or "—",
+        "Total": fmt_money(x.get("total_amount"), x.get("currency")),
+        "Status": status(x.get("validation_status")),
+        "Recommendation": status(x.get("recommendation")),
+    } for x in invoices]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    choices = [(i, x) for i, x in enumerate(invoices) if x.get("invoice_id")]
+    if not choices:
         return None
-
-    selected_label = st.selectbox(
-        "Select invoice",
-        list(options.keys()),
-        key="selected_invoice",
-    )
-
-    return options.get(
-        selected_label
-    )
+    selected_id = st.session_state.get("selected_invoice")
+    index = next((j for j, (_, x) in enumerate(choices) if str(x.get("invoice_id")) == selected_id), 0)
+    selected = st.selectbox("Open invoice", range(len(choices)), index=index, format_func=lambda j: f"{choices[j][1].get('invoice_number') or choices[j][1].get('file_name') or 'Invoice'} · {choices[j][1].get('vendor_name') or 'Unknown vendor'}", key="invoice_table_choice")
+    invoice_id = str(choices[selected][1]["invoice_id"])
+    st.session_state["selected_invoice"] = invoice_id
+    return invoice_id
